@@ -1,0 +1,70 @@
+##
+## Custom Suricata rules for the DVWA multi-stage attack lab.
+##
+## These are intentionally simple, high-recall signatures tuned to the
+## exact attack scripts in ../../attacks/. They are NOT production rules
+## (no evasion resistance, no pcre performance tuning) -- the goal is to
+## reliably generate a labeled alert stream for the alert-correlation /
+## RL research, not to demonstrate IDS engineering.
+##
+## SIDs 9000000-9000999 are reserved for this lab so they never collide
+## with the Emerging Threats Open ruleset (if you also load ET rules).
+
+# --- Stage: Recon --------------------------------------------------------
+alert http any any -> $HOME_NET 80 (msg:"LAB Recon - common path/file scan"; \
+  flow:to_server,established; http.method; content:"GET"; \
+  http.uri; content:"robots.txt"; \
+  classtype:web-application-attack; sid:9000001; rev:1; \
+  metadata:mitre_tactic TA0043, mitre_technique T1595, lab_stage recon;)
+
+alert http any any -> $HOME_NET 80 (msg:"LAB Recon - repeated 404s (content discovery)"; \
+  flow:to_server,established; http.stat_code; content:"404"; \
+  threshold:type threshold, track by_src, count 5, seconds 20; \
+  classtype:web-application-attack; sid:9000002; rev:1; \
+  metadata:mitre_tactic TA0043, mitre_technique T1595, lab_stage recon;)
+
+# --- Stage: Brute force ----------------------------------------------------
+alert http any any -> $HOME_NET 80 (msg:"LAB Bruteforce - repeated DVWA brute vuln requests"; \
+  flow:to_server,established; http.uri; content:"vulnerabilities/brute/"; \
+  threshold:type threshold, track by_src, count 4, seconds 15; \
+  classtype:attempted-recon; sid:9000010; rev:1; \
+  metadata:mitre_tactic TA0006, mitre_technique T1110, lab_stage bruteforce;)
+
+# --- Stage: SQL injection --------------------------------------------------
+alert http any any -> $HOME_NET 80 (msg:"LAB SQLi - UNION SELECT pattern in URI"; \
+  flow:to_server,established; http.uri; content:"UNION"; nocase; \
+  http.uri; content:"SELECT"; nocase; distance:0; \
+  classtype:web-application-attack; sid:9000020; rev:1; \
+  metadata:mitre_tactic TA0006, mitre_technique T1190, lab_stage sqli;)
+
+alert http any any -> $HOME_NET 80 (msg:"LAB SQLi - tautology / quote-based injection"; \
+  flow:to_server,established; http.uri; pcre:"/[\'\"](\s|%20)*(OR|AND)(\s|%20)*[\'\"]?1[\'\"]?=[\'\"]?1/i"; \
+  classtype:web-application-attack; sid:9000021; rev:1; \
+  metadata:mitre_tactic TA0006, mitre_technique T1190, lab_stage sqli;)
+
+# --- Stage: File upload / webshell -----------------------------------------
+alert http any any -> $HOME_NET 80 (msg:"LAB Upload - PHP file uploaded via DVWA upload form"; \
+  flow:to_server,established; http.uri; content:"vulnerabilities/upload/"; \
+  http.request_body; content:"filename="; content:".php"; distance:0; \
+  classtype:web-application-attack; sid:9000030; rev:1; \
+  metadata:mitre_tactic TA0002, mitre_technique T1505.003, lab_stage upload_rce;)
+
+alert http any any -> $HOME_NET 80 (msg:"LAB Upload - request to webshell in uploads dir"; \
+  flow:to_server,established; http.uri; content:"hackable/uploads/"; \
+  http.uri; content:".php"; \
+  classtype:web-application-attack; sid:9000031; rev:1; \
+  metadata:mitre_tactic TA0002, mitre_technique T1505.003, lab_stage upload_rce;)
+
+# --- Stage: Command & control / discovery via webshell ---------------------
+alert http any any -> $HOME_NET 80 (msg:"LAB C2 - webshell command execution parameter"; \
+  flow:to_server,established; http.uri; content:"hackable/uploads/"; \
+  http.uri; content:"cmd="; \
+  classtype:successful-user; sid:9000040; rev:1; \
+  metadata:mitre_tactic TA0007, mitre_technique T1082, lab_stage c2_discovery;)
+
+# --- Stage: Exfiltration ---------------------------------------------------
+alert http any any -> $HOME_NET 80 (msg:"LAB Exfil - sensitive file read via webshell (/etc/passwd)"; \
+  flow:to_server,established; http.uri; content:"hackable/uploads/"; \
+  http.uri; content:"passwd"; \
+  classtype:successful-user; sid:9000050; rev:1; \
+  metadata:mitre_tactic TA0010, mitre_technique T1041, lab_stage exfiltration;)

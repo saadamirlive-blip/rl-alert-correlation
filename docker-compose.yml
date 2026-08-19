@@ -1,0 +1,21 @@
+networks:
+  dvwa_net:
+    name: dvwa_net
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24
+
+services:
+  dvwa:
+    image: vulnerables/web-dvwa
+    container_name: dvwa
+    ports:
+      - "80:80"
+    networks:
+      dvwa_net:
+        ipv4_address: 172.28.0.10
+    volumes:
+      - ./data/dvwa_logs/apache2:/var/log/apache2
+      - ./data/dvwa_logs/mysql:/var/log/mysql
+    restart: unless-stopped
